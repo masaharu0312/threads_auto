@@ -19,7 +19,12 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       - name: Threadsトークンを登録
-        run: python src/setup_token.py --token "$THREADS_TOKEN"
+        run: |
+          if [ -z "$THREADS_TOKEN" ]; then
+            echo "THREADS_TOKEN が未登録のため、トークン登録は飛ばします"
+            exit 0
+          fi
+          python src/setup_token.py --token "$THREADS_TOKEN"
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

@@ -194,7 +194,13 @@ def main() -> None:
 
     if rows:
         push_images(paths, f"下書き画像を追加（{start.isoformat()}〜）")
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        # append_rows は「承認」列のチェックボックス設定（1000行目まで）を使用中とみなし、
+        # 1001行目以降に追記してしまうので、最後のデータ行の次に明示的に書き込む
+        start_row = len(ws.get_all_values()) + 1
+        end_row = start_row + len(rows) - 1
+        if end_row > ws.row_count:
+            ws.add_rows(end_row - ws.row_count)
+        ws.update(values=rows, range_name=f"A{start_row}", value_input_option="USER_ENTERED")
     print(f"{len(rows)}件をシートに追加しました")
 
     # 長期トークンは60日で切れるので、毎週更新しておく
