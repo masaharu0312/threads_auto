@@ -12,7 +12,7 @@ import sys
 
 import anthropic
 
-from common import (ROOT, COLUMNS, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
+from common import (ROOT, COLUMNS, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
                     now_jst, open_sheet, read_knowledge, read_settings, write_setting)
 from images import ensure_image, image_url, push_images
 from threads import ThreadsError, refresh_token
@@ -194,13 +194,14 @@ def main() -> None:
 
     if rows:
         push_images(paths, f"下書き画像を追加（{start.isoformat()}〜）")
-        # append_rows は「承認」列のチェックボックス設定（1000行目まで）を使用中とみなし、
-        # 1001行目以降に追記してしまうので、最後のデータ行の次に明示的に書き込む
-        start_row = len(ws.get_all_values()) + 1
+        # append_rows はチェックボックスだけの空行も「使用中」とみなして追記位置がずれるので、
+        # ID列の最後のデータの次に明示的に書き込む
+        start_row = next_post_row(ws)
         end_row = start_row + len(rows) - 1
         if end_row > ws.row_count:
             ws.add_rows(end_row - ws.row_count)
         ws.update(values=rows, range_name=f"A{start_row}", value_input_option="USER_ENTERED")
+        format_post_rows(sh, ws, start_row, end_row)
     print(f"{len(rows)}件をシートに追加しました")
 
     # 長期トークンは60日で切れるので、毎週更新しておく

@@ -77,6 +77,34 @@ def write_setting(sh: gspread.Spreadsheet, key: str, value: str) -> None:
         ws.append_row([key, value, ""], value_input_option="RAW")
 
 
+def next_post_row(ws: gspread.Worksheet) -> int:
+    """ID列（A列）の最後のデータの次の行番号。チェックボックスだけの行は数えない。"""
+    return len(ws.col_values(1)) + 1
+
+
+def format_post_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, first: int, last: int) -> None:
+    """投稿行（first〜last 行目）に、承認チェックボックス・行の高さ・本文の折り返しを付ける。
+
+    チェックボックスを空行にまで付けると、その行が「使用中」とみなされて
+    追記位置がずれるので、データのある行にだけ付ける。
+    """
+    if last < first:
+        return
+    rows = {"sheetId": ws.id, "startRowIndex": first - 1, "endRowIndex": last}
+    sh.batch_update({"requests": [
+        {"setDataValidation": {
+            "range": {**rows, "startColumnIndex": col("承認"), "endColumnIndex": col("承認") + 1},
+            "rule": {"condition": {"type": "BOOLEAN"}, "showCustomUi": True}}},
+        {"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": first - 1, "endIndex": last},
+            "properties": {"pixelSize": 200}, "fields": "pixelSize"}},
+        {"repeatCell": {
+            "range": {**rows, "startColumnIndex": col("本文"), "endColumnIndex": col("本文") + 1},
+            "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"}},
+            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
+    ]})
+
+
 def read_knowledge() -> str:
     return (ROOT / "knowledge.md").read_text(encoding="utf-8")
 

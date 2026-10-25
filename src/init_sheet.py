@@ -1,7 +1,8 @@
 """スプレッドシートに「投稿」「設定」シートを用意する（最初に1回だけ実行）。"""
 from __future__ import annotations
 
-from common import COLUMNS, POSTS_SHEET, SETTINGS_DEFAULTS, SETTINGS_SHEET, col, open_sheet
+from common import (COLUMNS, POSTS_SHEET, SETTINGS_DEFAULTS, SETTINGS_SHEET, col,
+                    format_post_rows, next_post_row, open_sheet)
 
 
 def get_or_add(sh, title: str, cols: int):
@@ -28,26 +29,17 @@ def main() -> None:
     if new_rows:
         settings.append_rows(new_rows, value_input_option="RAW")
 
-    # 「承認」列をチェックボックスに、列幅と行の高さを見やすく
+    # 列幅を見やすく。チェックボックスと行の高さはデータのある行にだけ付ける
     def dims(dimension: str, start: int, end: int, size: int) -> dict:
         return {"updateDimensionProperties": {
             "range": {"sheetId": posts.id, "dimension": dimension, "startIndex": start, "endIndex": end},
             "properties": {"pixelSize": size}, "fields": "pixelSize"}}
 
     sh.batch_update({"requests": [
-        {"setDataValidation": {
-            "range": {"sheetId": posts.id, "startRowIndex": 1, "endRowIndex": 1000,
-                      "startColumnIndex": col("承認"), "endColumnIndex": col("承認") + 1},
-            "rule": {"condition": {"type": "BOOLEAN"}, "showCustomUi": True}}},
         dims("COLUMNS", col("本文"), col("本文") + 1, 420),
         dims("COLUMNS", col("プレビュー"), col("プレビュー") + 1, 160),
-        dims("ROWS", 1, 1000, 200),
-        {"repeatCell": {
-            "range": {"sheetId": posts.id, "startRowIndex": 1, "endRowIndex": 1000,
-                      "startColumnIndex": col("本文"), "endColumnIndex": col("本文") + 1},
-            "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"}},
-            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
     ]})
+    format_post_rows(sh, posts, 2, next_post_row(posts) - 1)
     print("シートの準備ができました。「設定」シートの値を埋めてください。")
 
 
