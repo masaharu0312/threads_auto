@@ -1,0 +1,51 @@
+name: Threads 投稿
+
+on:
+  schedule:
+    - cron: "0 23 * * *"   # 朝 08:00 JST
+    - cron: "30 3 * * *"   # 昼 12:30 JST
+    - cron: "30 11 * * *"  # 夜 20:30 JST
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: 投稿する枠
+        required: true
+        type: choice
+        options: [朝, 昼, 夜]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - run: pip install -r requirements.txt
+      - name: 枠を決める
+        id: slot
+        run: |
+          case "${{ github.event.schedule }}" in
+            "0 23 * * *")  echo "slot=朝" >> "$GITHUB_OUTPUT" ;;
+            "30 3 * * *")  echo "slot=昼" >> "$GITHUB_OUTPUT" ;;
+            "30 11 * * *") echo "slot=夜" >> "$GITHUB_OUTPUT" ;;
+            *)             echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: git の設定
+        run: |
+          git config user.name "threads-bot"
+          git config user.email "threads-bot@users.noreply.github.com"
+      - name: 投稿
+        run: python src/post.py --slot "${{ steps.slot.outputs.slot }}"
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

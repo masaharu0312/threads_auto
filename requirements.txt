@@ -1,0 +1,5 @@
+anthropic>=0.125
+gspread>=6.0
+google-auth
+pillow
+requests

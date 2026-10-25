@@ -1,0 +1,7 @@
+service_account.json
+preview/
+__pycache__/
+.env
+# 下書きは取り込み用のJSONだけ公開する
+drafts/*
+!drafts/2026-10-26_week_v3.json

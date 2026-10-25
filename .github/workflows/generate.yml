@@ -1,0 +1,50 @@
+name: 翌週の下書きを作成
+
+on:
+  schedule:
+    - cron: "0 1 * * 0"  # 毎週日曜 10:00 JST
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 開始日 YYYY-MM-DD（空なら次の月曜）
+        required: false
+      days:
+        description: 日数
+        required: false
+        default: "7"
+      from_json:
+        description: 取り込むJSON（例 drafts/2026-10-26_week_v2.json）。指定するとAIを使わずそのまま取り込む
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - run: pip install -r requirements.txt
+      - name: git の設定
+        run: |
+          git config user.name "threads-bot"
+          git config user.email "threads-bot@users.noreply.github.com"
+      - name: 下書き作成
+        run: |
+          ARGS="--days ${{ inputs.days || '7' }}"
+          if [ -n "${{ inputs.start }}" ]; then ARGS="$ARGS --start ${{ inputs.start }}"; fi
+          if [ -n "${{ inputs.from_json }}" ]; then ARGS="$ARGS --from-json ${{ inputs.from_json }}"; fi
+          python src/generate.py $ARGS
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
