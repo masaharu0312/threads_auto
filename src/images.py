@@ -10,7 +10,7 @@ from pathlib import Path
 import requests
 
 from common import ROOT
-from render import render
+from render import RENDER_VERSION, render
 
 IMAGES_DIR = ROOT / "images"
 PHOTOS_DIR = ROOT / "assets" / "photos"
@@ -19,7 +19,7 @@ PHOTOS_DIR = ROOT / "assets" / "photos"
 def ensure_image(slot: str, kind: str, headline: str, body: str, note: str,
                  photo_name: str, display_name: str) -> Path:
     """内容のハッシュをファイル名にして、まだ無ければ画像を作る。"""
-    key = "|".join([slot, kind, headline, body, note, photo_name, display_name])
+    key = "|".join([RENDER_VERSION, slot, kind, headline, body, note, photo_name, display_name])
     name = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + ".png"
     path = IMAGES_DIR / name
     if not path.exists():

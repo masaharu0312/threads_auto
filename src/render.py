@@ -16,6 +16,12 @@ WHITE = (255, 255, 255)
 CARD = (60, 190, 1020, 1190)  # 白いカードの範囲
 PAD = 64
 
+# 右下に重ねるマスコット（ファイルが無ければ入れない）
+MASCOT = Path(__file__).resolve().parent.parent / "assets" / "mascot" / "toarun_mascot_chatgpt.png"
+MASCOT_CENTER, MASCOT_SIZE = (928, 1196), 220
+# 見た目を変えたら上げる（投稿直前に古い画像を使い回さず作り直すため）
+RENDER_VERSION = "2"
+
 FONTS = {
     "bold": [
         ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),
@@ -159,9 +165,11 @@ def render(kind: str, slot: str, headline: str, body: str, note: str,
 
     # 注記はカード下部に固定
     note_f = font("regular", 24)
-    note_lines = wrap(note, note_f, inner_w) if note else []
+    mascot = MASCOT.exists()
+    note_w = inner_w - 190 if mascot else inner_w  # マスコットと重ならないよう注記は右を空ける
+    note_lines = wrap(note, note_f, note_w) if note else []
     note_top = y1 - PAD - len(note_lines) * int(24 * 1.45)
-    bottom = note_top - 30
+    bottom = min(note_top, 1100) - 30 if mascot else note_top - 30
 
     # 一度仮に描いて高さを測り、本文ブロックを上下中央に置く
     scratch = ImageDraw.Draw(Image.new("RGB", (W, H)))
@@ -174,5 +182,23 @@ def render(kind: str, slot: str, headline: str, body: str, note: str,
 
     if display_name:
         nf = font("bold", 34)
-        d.text(((W - nf.getlength(display_name)) / 2, 1240), display_name, font=nf, fill=DEEP)
+        center = (W - MASCOT_SIZE) / 2 if mascot else W / 2
+        d.text((center - nf.getlength(display_name) / 2, 1240), display_name, font=nf, fill=DEEP)
+
+    if mascot:
+        paste_mascot(img)
     return img
+
+
+def paste_mascot(img: Image.Image) -> None:
+    """マスコットを白いふち付きの丸に切り抜いて、カードの右下に重ねる。"""
+    s = MASCOT_SIZE
+    face = ImageOps.fit(Image.open(MASCOT).convert("RGB"), (s, s), centering=(0.5, 0.35))
+    mask = Image.new("L", (s * 4, s * 4), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, s * 4, s * 4), fill=255)
+    mask = mask.resize((s, s), Image.LANCZOS)
+    cx, cy = MASCOT_CENTER
+    ring = 10
+    d = ImageDraw.Draw(img)
+    d.ellipse((cx - s / 2 - ring, cy - s / 2 - ring, cx + s / 2 + ring, cy + s / 2 + ring), fill=WHITE, outline=BLUE, width=4)
+    img.paste(face, (int(cx - s / 2), int(cy - s / 2)), mask)
