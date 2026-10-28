@@ -2,18 +2,18 @@ name: Threads 投稿
 
 on:
   schedule:
-    - cron: "0 23 * * *"   # 朝 08:00 JST
-    - cron: "30 3 * * *"   # 昼 12:30 JST
-    - cron: "30 11 * * *"  # 夜 20:30 JST
+    # GitHub の定時実行は飛ばされることがあるので、30分ごとに見回って
+    # 予定時刻（朝 8:00 / 昼 12:30 / 夜 20:30 JST）を過ぎた承認済みの投稿を拾う
+    - cron: "7,37 * * * *"
   workflow_dispatch:
     inputs:
       slot:
-        description: 投稿する枠
-        required: true
+        description: 今すぐ投稿する枠（空なら見回り）
+        required: false
         type: choice
-        options: [朝, 昼, 夜]
+        options: ["", 朝, 昼, 夜]
       date:
-        description: 投稿する日付 YYYY-MM-DD（空なら今日）
+        description: 枠と一緒に使う日付 YYYY-MM-DD（空なら今日）
         required: false
 
 permissions:
@@ -34,22 +34,14 @@ jobs:
           cache: pip
       - run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - run: pip install -r requirements.txt
-      - name: 枠を決める
-        id: slot
-        run: |
-          case "${{ github.event.schedule }}" in
-            "0 23 * * *")  echo "slot=朝" >> "$GITHUB_OUTPUT" ;;
-            "30 3 * * *")  echo "slot=昼" >> "$GITHUB_OUTPUT" ;;
-            "30 11 * * *") echo "slot=夜" >> "$GITHUB_OUTPUT" ;;
-            *)             echo "slot=${{ inputs.slot }}" >> "$GITHUB_OUTPUT" ;;
-          esac
       - name: git の設定
         run: |
           git config user.name "threads-bot"
           git config user.email "threads-bot@users.noreply.github.com"
       - name: 投稿
         run: |
-          ARGS=(--slot "${{ steps.slot.outputs.slot }}")
+          ARGS=()
+          if [ -n "${{ inputs.slot }}" ]; then ARGS+=(--slot "${{ inputs.slot }}"); fi
           if [ -n "${{ inputs.date }}" ]; then ARGS+=(--date "${{ inputs.date }}"); fi
           python src/post.py "${ARGS[@]}"
         env:
