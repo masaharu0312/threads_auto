@@ -17,10 +17,14 @@ CARD = (60, 190, 1020, 1190)  # 白いカードの範囲
 PAD = 64
 
 # 右下に重ねるマスコット（ファイルが無ければ入れない）
-MASCOT = Path(__file__).resolve().parent.parent / "assets" / "mascot" / "toarun_mascot_chatgpt.png"
+MASCOT_DIR = Path(__file__).resolve().parent.parent / "assets" / "mascot"
+MASCOT = MASCOT_DIR / "toarun_mascot_chatgpt.png"
+# 投稿の内容に合わせて「とあるん」の表情を変える（シートの「表情」列 → ファイル名）
+EMOTIONS = {"にっこり": "happy", "ワクワク": "excited", "びっくり": "surprised",
+            "うるうる": "moved", "まじめ": "serious", "考え中": "thinking"}
 MASCOT_CENTER, MASCOT_SIZE = (928, 1196), 220
 # 見た目を変えたら上げる（投稿直前に古い画像を使い回さず作り直すため）
-RENDER_VERSION = "2"
+RENDER_VERSION = "3"
 
 FONTS = {
     "bold": [
@@ -142,7 +146,7 @@ def _content(d: ImageDraw.ImageDraw, kind: str, headline: str, body: str,
 
 
 def render(kind: str, slot: str, headline: str, body: str, note: str,
-           display_name: str = "", photo: Path | None = None) -> Image.Image:
+           display_name: str = "", photo: Path | None = None, emotion: str = "") -> Image.Image:
     img = Image.new("RGB", (W, H), PALE)
     d = ImageDraw.Draw(img)
 
@@ -186,14 +190,19 @@ def render(kind: str, slot: str, headline: str, body: str, note: str,
         d.text((center - nf.getlength(display_name) / 2, 1240), display_name, font=nf, fill=DEEP)
 
     if mascot:
-        paste_mascot(img)
+        paste_mascot(img, emotion)
     return img
 
 
-def paste_mascot(img: Image.Image) -> None:
+def mascot_file(emotion: str) -> Path:
+    path = MASCOT_DIR / "emotions" / f"{EMOTIONS.get(emotion, '')}.png"
+    return path if emotion in EMOTIONS and path.exists() else MASCOT
+
+
+def paste_mascot(img: Image.Image, emotion: str = "") -> None:
     """マスコットを白いふち付きの丸に切り抜いて、カードの右下に重ねる。"""
     s = MASCOT_SIZE
-    face = ImageOps.fit(Image.open(MASCOT).convert("RGB"), (s, s), centering=(0.5, 0.35))
+    face = ImageOps.fit(Image.open(mascot_file(emotion)).convert("RGB"), (s, s), centering=(0.5, 0.35))
     mask = Image.new("L", (s * 4, s * 4), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, s * 4, s * 4), fill=255)
     mask = mask.resize((s, s), Image.LANCZOS)

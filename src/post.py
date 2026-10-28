@@ -10,7 +10,7 @@ import argparse
 import datetime as dt
 import sys
 
-from common import (JST, POSTS_SHEET, SLOTS, col, col_letter, ensure_disclosure,
+from common import (COLUMNS, JST, POSTS_SHEET, SLOTS, col, col_letter, ensure_disclosure,
                     now_jst, open_sheet, read_settings)
 from images import ensure_image, image_url, push_images, wait_until_public
 from threads import post_image
@@ -42,7 +42,7 @@ def main() -> int:
     settings = read_settings(sh)
     ws = sh.worksheet(POSTS_SHEET)
     values = ws.get_all_values()
-    width = len(values[0])
+    width = max(len(values[0]), len(COLUMNS))
     rows = [(i + 1, r + [""] * (width - len(r))) for i, r in enumerate(values) if i > 0 and r and r[0]]
 
     def update(row_no: int, **fields: str) -> None:
@@ -59,7 +59,7 @@ def main() -> int:
             # シートで画像の文言を直していても反映されるよう、投稿直前に作り直す
             path = ensure_image(r[col("枠")], r[col("画像タイプ")] or "message", r[col("画像見出し")],
                                 r[col("画像本文")], r[col("画像注記")], r[col("写真ファイル")],
-                                settings.get("表示名", ""))
+                                settings.get("表示名", ""), r[col("表情")])
             if args.dry_run:
                 print(f"--- {r[col('ID')]} ---\n{text}\n画像: {path}")
                 return True

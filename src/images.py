@@ -17,15 +17,15 @@ PHOTOS_DIR = ROOT / "assets" / "photos"
 
 
 def ensure_image(slot: str, kind: str, headline: str, body: str, note: str,
-                 photo_name: str, display_name: str) -> Path:
+                 photo_name: str, display_name: str, emotion: str = "") -> Path:
     """内容のハッシュをファイル名にして、まだ無ければ画像を作る。"""
-    key = "|".join([RENDER_VERSION, slot, kind, headline, body, note, photo_name, display_name])
+    key = "|".join([RENDER_VERSION, slot, kind, headline, body, note, photo_name, display_name, emotion])
     name = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + ".png"
     path = IMAGES_DIR / name
     if not path.exists():
         IMAGES_DIR.mkdir(exist_ok=True)
         photo = PHOTOS_DIR / photo_name if photo_name else None
-        render(kind, slot, headline, body, note, display_name, photo).save(path, optimize=True)
+        render(kind, slot, headline, body, note, display_name, photo, emotion).save(path, optimize=True)
     return path
 
 

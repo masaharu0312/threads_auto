@@ -16,7 +16,9 @@ def main() -> None:
     sh = open_sheet()
 
     posts = get_or_add(sh, POSTS_SHEET, len(COLUMNS))
-    if not posts.row_values(1):
+    if posts.col_count < len(COLUMNS):
+        posts.add_cols(len(COLUMNS) - posts.col_count)
+    if posts.row_values(1) != COLUMNS:  # 新しい列が増えたときも見出しを最新にする（列は末尾にしか足さない）
         posts.update(values=[COLUMNS], range_name="A1")
     posts.freeze(rows=1)
 

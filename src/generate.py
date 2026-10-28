@@ -15,6 +15,7 @@ import anthropic
 from common import (ROOT, COLUMNS, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
                     now_jst, open_sheet, read_knowledge, read_settings, write_setting)
 from images import ensure_image, image_url, push_images
+from render import EMOTIONS
 from threads import ThreadsError, refresh_token
 
 MODEL = "claude-opus-5-5"
@@ -47,9 +48,10 @@ POST_SCHEMA = {
                     "image_headline": {"type": "string"},
                     "image_body": {"type": "string"},
                     "image_note": {"type": "string"},
+                    "mascot_emotion": {"type": "string", "enum": list(EMOTIONS)},
                 },
                 "required": ["slot", "theme", "text", "image_kind",
-                             "image_headline", "image_body", "image_note"],
+                             "image_headline", "image_body", "image_note", "mascot_emotion"],
                 "additionalProperties": False,
             },
         }
@@ -69,6 +71,8 @@ FORMAT_RULES = """\
 - image_headline：画像の見出し。message は2行まで・1行9字以内で、行の区切りに必ず \\n を入れる（例：「キレイ」を\\n一緒に喜ぶ仕事。）。助詞だけが次の行に残る区切り方はしない。number は数字と単位だけ（例：460万人）、qa は30字以内の質問文、voice は50字以内の引用文。
 - image_body：画像の説明文。message・qa は60字以内、number は30字以内。voice の場合は「〇〇店オーナー」。
 - image_note：画像下部の注記（No.1表記の出典、「個人の事例です」など）。不要なら空文字。
+- mascot_emotion：画像の右下に出るマスコット「とあるん」（オーナーの分身）の表情。投稿を読んだときのオーナーの気持ちに合うものを選ぶ。
+  にっこり（うれしい・好き）／ワクワク（期待・誘い）／びっくり（驚き・意外な事実）／うるうる（感動・共感）／まじめ（本音・注意点）／考え中（問いかけ・Q&A）。3投稿で同じ表情が続かないようにする。
 """
 
 
@@ -170,7 +174,7 @@ def main() -> None:
             if post_id in existing:
                 continue
             path = ensure_image(p["slot"], p["image_kind"], p["image_headline"],
-                                p["image_body"], p["image_note"], "", display_name)
+                                p["image_body"], p["image_note"], "", display_name, p.get("mascot_emotion", ""))
             paths.append(path)
             url = image_url(path)
             row = [""] * len(COLUMNS)
@@ -184,6 +188,7 @@ def main() -> None:
             row[col("画像見出し")] = p["image_headline"]
             row[col("画像本文")] = p["image_body"]
             row[col("画像注記")] = p["image_note"]
+            row[col("表情")] = p.get("mascot_emotion", "")
             row[col("画像URL")] = url
             row[col("プレビュー")] = f'=IMAGE("{url}")'
             row[col("承認")] = "FALSE"
