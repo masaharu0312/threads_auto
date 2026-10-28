@@ -1,0 +1,58 @@
+name: 美容 Threads 投稿
+
+on:
+  schedule:
+    # 30分ごとに見回って、予定時刻（朝 7:30 / 昼 12:30 / 夜 21:00 JST）を過ぎた承認済みの投稿を拾う
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: 今すぐ投稿する枠（空なら見回り）
+        required: false
+        type: choice
+        options: ["", 朝, 昼, 夜]
+      date:
+        description: 枠と一緒に使う日付 YYYY-MM-DD（空なら今日）
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beauty-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 準備ができているか確認
+        id: ready
+        run: |
+          if [ -z "$SHEET_ID" ]; then
+            echo "BEAUTY_SHEET_ID が未登録のため、何もしません"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.ready.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+      - name: 投稿
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          ARGS=()
+          if [ -n "${{ inputs.slot }}" ]; then ARGS+=(--slot "${{ inputs.slot }}"); fi
+          if [ -n "${{ inputs.date }}" ]; then ARGS+=(--date "${{ inputs.date }}"); fi
+          python beauty/src/post.py "${ARGS[@]}"
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

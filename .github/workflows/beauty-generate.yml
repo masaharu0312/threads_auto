@@ -1,0 +1,56 @@
+name: 美容 翌週の下書きを作成
+
+on:
+  schedule:
+    - cron: "30 1 * * 0"  # 毎週日曜 10:30 JST
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 開始日 YYYY-MM-DD（空なら次の月曜）
+        required: false
+      days:
+        description: 日数
+        required: false
+        default: "7"
+      from_json:
+        description: 取り込むJSON（例 beauty/drafts/2026-11-02_week.json）。指定するとAIを使わずそのまま取り込む
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 準備ができているか確認
+        id: ready
+        run: |
+          if [ -z "$SHEET_ID" ]; then
+            echo "BEAUTY_SHEET_ID が未登録のため、何もしません"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.ready.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+      - name: 下書き作成
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          ARGS=(--days "${{ inputs.days || '7' }}")
+          if [ -n "${{ inputs.start }}" ]; then ARGS+=(--start "${{ inputs.start }}"); fi
+          if [ -n "${{ inputs.from_json }}" ]; then ARGS+=(--from-json "${{ inputs.from_json }}"); fi
+          python beauty/src/generate.py "${ARGS[@]}"
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

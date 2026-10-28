@@ -46,6 +46,32 @@ def refresh_token(token: str) -> str:
     return data["access_token"]
 
 
+def post_text(user_id: str, token: str, text: str, reply_to_id: str = "") -> tuple[str, str]:
+    """文章だけで投稿し、(投稿ID, 投稿URL) を返す。reply_to_id を渡すとその投稿への返信（コメント）になる。
+
+    返信には Meta アプリの threads_manage_replies 権限が必要。
+    """
+    params = {"media_type": "TEXT", "text": text, "access_token": token}
+    if reply_to_id:
+        params["reply_to_id"] = reply_to_id
+    container = _call("POST", f"{BASE}/{user_id}/threads", **params)["id"]
+
+    for _ in range(12):
+        time.sleep(5)
+        status = _call("GET", f"{BASE}/{container}", fields="status,error_message", access_token=token)
+        if status.get("status") == "FINISHED":
+            break
+        if status.get("status") in ("ERROR", "EXPIRED"):
+            raise ThreadsError(f"投稿の処理に失敗: {status.get('error_message', status)}")
+    else:
+        raise ThreadsError("投稿の処理が1分以内に終わりませんでした")
+
+    media_id = _call("POST", f"{BASE}/{user_id}/threads_publish",
+                     creation_id=container, access_token=token)["id"]
+    permalink = _call("GET", f"{BASE}/{media_id}", fields="permalink", access_token=token).get("permalink", "")
+    return media_id, permalink
+
+
 def post_image(user_id: str, token: str, text: str, image_url: str) -> tuple[str, str]:
     """画像付きで投稿し、(投稿ID, 投稿URL) を返す。"""
     container = _call("POST", f"{BASE}/{user_id}/threads", media_type="IMAGE",
