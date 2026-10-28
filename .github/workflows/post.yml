@@ -12,6 +12,9 @@ on:
         required: true
         type: choice
         options: [朝, 昼, 夜]
+      date:
+        description: 投稿する日付 YYYY-MM-DD（空なら今日）
+        required: false
 
 permissions:
   contents: write
@@ -45,7 +48,10 @@ jobs:
           git config user.name "threads-bot"
           git config user.email "threads-bot@users.noreply.github.com"
       - name: 投稿
-        run: python src/post.py --slot "${{ steps.slot.outputs.slot }}"
+        run: |
+          ARGS=(--slot "${{ steps.slot.outputs.slot }}")
+          if [ -n "${{ inputs.date }}" ]; then ARGS+=(--date "${{ inputs.date }}"); fi
+          python src/post.py "${ARGS[@]}"
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
