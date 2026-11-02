@@ -2,7 +2,7 @@
 
     python beauty/src/generate.py                  # 次の月曜から7日分
     python beauty/src/generate.py --start 2026-11-02 --days 3
-    python beauty/src/generate.py --from-json beauty/drafts/2026-11-02_week.json
+    python beauty/src/generate.py --from-json beauty/drafts/2026-11-03_week.json
 """
 from __future__ import annotations
 
