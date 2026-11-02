@@ -13,7 +13,7 @@ on:
         required: false
         default: "7"
       from_json:
-        description: 取り込むJSON（例 beauty/drafts/2026-11-02_week.json）。指定するとAIを使わずそのまま取り込む
+        description: 取り込むJSON（例 beauty/drafts/2026-11-03_week.json）。指定するとAIを使わずそのまま取り込む
         required: false
 
 permissions:

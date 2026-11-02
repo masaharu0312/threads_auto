@@ -37,7 +37,7 @@ MUSEE 用と共通のもの（`GOOGLE_SERVICE_ACCOUNT_JSON`・`ANTHROPIC_API_KEY
    | `BEAUTY_THREADS_TOKEN` | 美容用アカウントのトークン |
 5. Actions →「美容 初期設定（シート作成・トークン登録）」→ Run workflow。
 6. 「設定」シートに、ASP で決めた案件のサービス名・リンク、案件の禁止表現を入力します。
-7. 最初の1週間分を取り込む：Actions →「美容 翌週の下書きを作成」→ `from_json` に `beauty/drafts/2026-11-02_week.json`。
+7. 最初の1週間分を取り込む：Actions →「美容 翌週の下書きを作成」→ `from_json` に `beauty/drafts/2026-11-03_week.json`。
    日付を変えたいときは、シートの「日付」列を直します（IDは変えなくてOK）。
 
 `BEAUTY_SHEET_ID` が未登録のあいだは、投稿・下書き作成のワークフローは何もせずに終わります。
