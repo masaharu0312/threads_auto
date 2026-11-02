@@ -15,6 +15,10 @@ on:
       from_json:
         description: 取り込むJSON（例 beauty/drafts/2026-11-03_week.json）。指定するとAIを使わずそのまま取り込む
         required: false
+      replace:
+        description: まだ投稿していない同じIDの行を上書きする
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,6 +53,7 @@ jobs:
           ARGS=(--days "${{ inputs.days || '7' }}")
           if [ -n "${{ inputs.start }}" ]; then ARGS+=(--start "${{ inputs.start }}"); fi
           if [ -n "${{ inputs.from_json }}" ]; then ARGS+=(--from-json "${{ inputs.from_json }}"); fi
+          if [ "${{ inputs.replace }}" = "true" ]; then ARGS+=(--replace); fi
           python beauty/src/generate.py "${ARGS[@]}"
         env:
           SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}

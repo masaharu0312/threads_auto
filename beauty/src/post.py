@@ -1,4 +1,7 @@
-"""承認済みの下書きを Threads に投稿する（文章のみ）。検索・行動の投稿は、紹介文とリンクをコメント欄に付ける。
+"""承認済みの下書きを Threads に投稿する（文章のみ）。
+
+本文（つかみ）を出したあと、「コメント」列の中身を自分の返信として順に付ける。
+検索・行動の投稿は、最後のコメントに紹介文とリンクを付ける。
 
     python beauty/src/post.py                     # 見回り：予定時刻を過ぎた承認済みの投稿を1件だけ投稿する
     python beauty/src/post.py --slot 朝           # 今日の朝の枠を今すぐ投稿する
@@ -12,15 +15,15 @@ import sys
 import time
 
 from common import (COLUMNS, JST, POSTS_SHEET, SLOTS, build_comment, col, col_letter, now_jst,
-                    open_sheet, read_settings, with_disclosure)
+                    open_sheet, read_settings, split_replies, with_disclosure)
 from threads import post_text
 
 MAX_CHARS = 500
 # 予定時刻からこれ以上遅れたら、深夜などの不自然な時間に出ないよう自動では投稿しない
 GRACE = dt.timedelta(hours=3)
 # もう投稿しない状態（見回りの対象から外す）
-DONE_STATES = {"投稿済み", "投稿済み（コメントなし）", "未承認のため見送り", "見送り（時間切れ）"}
-# 本文を出してからコメントを付けるまでの待ち時間（Meta の推奨は約30秒）
+DONE_STATES = {"投稿済み", "投稿済み（コメント途中）", "未承認のため見送り", "見送り（時間切れ）"}
+# コメントを1つ付けるごとの待ち時間（Meta の推奨は約30秒）
 REPLY_WAIT = 30
 
 
@@ -58,14 +61,17 @@ def main() -> int:
         text = with_disclosure(r[col("本文")], r[col("種類")], settings.get("必須表記", ""))
         offer = r[col("紹介先")].strip()
         try:
-            if len(text) > MAX_CHARS:
-                raise ValueError(f"本文が{len(text)}字です（上限{MAX_CHARS}字）")
-            # 紹介先があるのにリンクが未設定なら、本文も出さない（「コメント欄に」が空振りするため）
-            comment = build_comment(r[col("コメント")], offer, settings) if offer else ""
-            if len(comment) > MAX_CHARS:
-                raise ValueError(f"コメントが{len(comment)}字です（上限{MAX_CHARS}字）")
+            replies = split_replies(r[col("コメント")])
+            # 紹介先があるのにリンクが未設定なら、本文も出さない（「次のコメントに」が空振りするため）
+            if offer:
+                replies.append(build_comment(r[col("紹介文")], offer, settings))
+            for label, t in [("本文", text), *((f"コメント{i}", c) for i, c in enumerate(replies, 1))]:
+                if len(t) > MAX_CHARS:
+                    raise ValueError(f"{label}が{len(t)}字です（上限{MAX_CHARS}字）")
             if args.dry_run:
-                print(f"--- {pid} ---\n{text}\n[コメント]\n{comment or '（なし）'}")
+                print(f"--- {pid} ---\n{text}")
+                for i, c in enumerate(replies, 1):
+                    print(f"[コメント{i}]\n{c}")
                 return True
         except Exception as e:
             print(f"{pid}: 失敗 {e}", file=sys.stderr)
@@ -74,19 +80,26 @@ def main() -> int:
 
         user_id, token = settings["user_id"], settings["access_token"]
         media_id = r[col("投稿ID")]
+        # 途中で失敗したときは、付け終わったコメントの続きから付け直す
+        reply_ids = [x for x in r[col("コメントID")].splitlines() if x]
+        reply_urls = [x for x in r[col("コメントURL")].splitlines() if x]
         try:
-            if not media_id:  # 本文がまだなら出す（コメントだけ失敗した行は本文を出し直さない）
+            if not media_id:
                 media_id, permalink = post_text(user_id, token, text)
                 update(row_no, 投稿ID=media_id, 投稿URL=permalink,
-                       投稿日時=now_jst().strftime("%Y-%m-%d %H:%M"), 状態="投稿済み" if not comment else "コメント待ち",
-                       エラー="")
+                       投稿日時=now_jst().strftime("%Y-%m-%d %H:%M"),
+                       状態="投稿済み" if not replies else "コメント中", エラー="")
                 print(f"{pid}: 投稿しました {permalink}")
-                if comment:
-                    time.sleep(REPLY_WAIT)
-            if comment:
-                _, comment_url = post_text(user_id, token, comment, reply_to_id=media_id)
-                update(row_no, 状態="投稿済み", コメントURL=comment_url, エラー="")
-                print(f"{pid}: コメントを付けました {comment_url}")
+            for c in replies[len(reply_ids):]:
+                time.sleep(REPLY_WAIT)
+                # 直前のコメントへの返信にして、1本のスレッドとしてつなげる
+                cid, curl = post_text(user_id, token, c, reply_to_id=reply_ids[-1] if reply_ids else media_id)
+                reply_ids.append(cid)
+                reply_urls.append(curl)
+                done = len(reply_ids) == len(replies)
+                update(row_no, コメントID="\n".join(reply_ids), コメントURL="\n".join(reply_urls),
+                       状態="投稿済み" if done else "コメント中", エラー="")
+                print(f"{pid}: コメント{len(reply_ids)}/{len(replies)}を付けました {curl}")
             return True
         except Exception as e:  # 失敗はシートに残す（見回りなら猶予時間内は次回また試す）
             print(f"{pid}: 失敗 {e}", file=sys.stderr)
@@ -105,7 +118,7 @@ def main() -> int:
             return 0
         ok = True
         for n, r in targets:
-            if r[col("状態")] in ("投稿済み", "投稿済み（コメントなし）"):
+            if r[col("状態")] in ("投稿済み", "投稿済み（コメント途中）"):
                 continue
             if not approved(r):
                 print(f"{r[col('ID')]}: 未承認のため見送り")
@@ -122,8 +135,8 @@ def main() -> int:
         if at is None or at > now or r[col("状態")] in DONE_STATES:
             continue
         if now - at > GRACE:
-            if r[col("投稿ID")]:  # 本文は出ていてコメントだけ付けられなかった
-                state = "投稿済み（コメントなし）"
+            if r[col("投稿ID")]:  # 本文は出ていてコメントを付けきれなかった
+                state = "投稿済み（コメント途中）"
             else:
                 state = "見送り（時間切れ）" if approved(r) else "未承認のため見送り"
             print(f"{r[col('ID')]}: {state}")

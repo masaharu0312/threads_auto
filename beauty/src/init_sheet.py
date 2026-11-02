@@ -18,7 +18,7 @@ def main() -> None:
     posts = get_or_add(sh, POSTS_SHEET, len(COLUMNS))
     if posts.col_count < len(COLUMNS):
         posts.add_cols(len(COLUMNS) - posts.col_count)
-    if posts.row_values(1) != COLUMNS:  # 新しい列が増えたときも見出しを最新にする（列は末尾にしか足さない）
+    if posts.row_values(1) != COLUMNS:  # 列が変わったときも見出しを最新にする（既存の行は generate.py --replace で入れ直す）
         posts.update(values=[COLUMNS], range_name="A1")
     posts.freeze(rows=1)
 
@@ -38,8 +38,9 @@ def main() -> None:
             "properties": {"pixelSize": size}, "fields": "pixelSize"}}
 
     sh.batch_update({"requests": [
-        dims("COLUMNS", col("本文"), col("本文") + 1, 420),
-        dims("COLUMNS", col("コメント"), col("コメント") + 1, 320),
+        dims("COLUMNS", col("本文"), col("本文") + 1, 300),
+        dims("COLUMNS", col("コメント"), col("コメント") + 1, 480),
+        dims("COLUMNS", col("紹介文"), col("紹介文") + 1, 320),
     ]})
     format_post_rows(sh, posts, 2, next_post_row(posts) - 1)
     print("シートの準備ができました。「設定」シートの値を埋めてください。")

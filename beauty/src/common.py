@@ -26,7 +26,7 @@ SLOTS = {"朝": "07:30", "昼": "12:30", "夜": "21:00"}
 
 # 教材の4種類。認知・興味関心：7割／検索・行動：3割
 KINDS = ["認知", "興味関心", "検索", "行動"]
-LINK_KINDS = {"検索", "行動"}  # コメント欄に紹介文とリンクを付ける種類
+LINK_KINDS = {"検索", "行動"}  # 最後のコメントに紹介文とリンクを付ける種類
 
 # 紹介先 → 設定シートのサービス名・リンクのキー
 OFFERS = {
@@ -35,18 +35,20 @@ OFFERS = {
     "条件": ("条件検索向け_サービス名", "条件検索向け_リンク"),
 }
 PLACEHOLDER = "○○"
+# 本文（つかみ）のあとに付けるコメント（メインの中身）は、シートの「コメント」列にこの行で区切って書く
+REPLY_SEP = "---"
 
 COLUMNS = [
-    "ID", "日付", "枠", "種類", "テーマ", "本文", "紹介先", "コメント",
-    "承認", "状態", "投稿日時", "投稿URL", "コメントURL", "エラー", "投稿ID",
+    "ID", "日付", "枠", "種類", "テーマ", "本文", "コメント", "紹介先", "紹介文",
+    "承認", "状態", "投稿日時", "投稿URL", "コメントURL", "エラー", "投稿ID", "コメントID",
 ]
 
 # 設定シートの初期値（キー, 値, 説明）
 SETTINGS_DEFAULTS = [
     ("立場", "美容サロンを経営している人。雇う側だから分かる、ブラックなサロンの見分け方と長く働ける職場の条件を正直に話す",
      "AIに伝えるアカウントの立場"),
-    ("必須表記", "#PR", "検索・行動の投稿の本文末尾と、コメント（紹介文）の先頭に付ける広告表記"),
-    ("経験者向け_サービス名", "", "経験者向けに紹介する転職サービス名（コメントの ○○ に入る）"),
+    ("必須表記", "#PR", "検索・行動の投稿の本文末尾と、紹介文の先頭に付ける広告表記"),
+    ("経験者向け_サービス名", "", "経験者向けに紹介する転職サービス名（紹介文の ○○ に入る）"),
     ("経験者向け_リンク", "", "ASPで発行したアフィリエイトリンク"),
     ("未経験向け_サービス名", "", "未経験・ブランク向けに紹介するサービス名"),
     ("未経験向け_リンク", "", "ASPで発行したアフィリエイトリンク"),
@@ -118,7 +120,7 @@ def next_post_row(ws: gspread.Worksheet) -> int:
 
 
 def format_post_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, first: int, last: int) -> None:
-    """投稿行（first〜last 行目）に、承認チェックボックスと本文・コメントの折り返しを付ける。"""
+    """投稿行（first〜last 行目）に、承認チェックボックスと本文〜紹介文の折り返しを付ける。"""
     if last < first:
         return
     rows = {"sheetId": ws.id, "startRowIndex": first - 1, "endRowIndex": last}
@@ -131,7 +133,7 @@ def format_post_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, first: int,
             "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": first - 1, "endIndex": last},
             "properties": {"pixelSize": 200}, "fields": "pixelSize"}},
         {"repeatCell": {
-            "range": {**rows, "startColumnIndex": col("本文"), "endColumnIndex": col("コメント") + 1},
+            "range": {**rows, "startColumnIndex": col("本文"), "endColumnIndex": col("紹介文") + 1},
             "cell": wrap, "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
     ]})
 
@@ -148,10 +150,27 @@ def with_disclosure(text: str, kind: str, disclosure: str) -> str:
     return text
 
 
-def build_comment(template: str, offer: str, settings: dict[str, str]) -> str:
-    """コメント（紹介文）の ○○ をサービス名に置き換え、先頭に広告表記・末尾にリンクを付ける。
+def split_replies(text: str) -> list[str]:
+    """「コメント」列を、--- の行で区切ったコメントのリストにする。"""
+    parts, cur = [], []
+    for line in text.splitlines():
+        if line.strip() == REPLY_SEP:
+            parts.append("\n".join(cur))
+            cur = []
+        else:
+            cur.append(line)
+    parts.append("\n".join(cur))
+    return [p.strip() for p in parts if p.strip()]
 
-    サービス名やリンクが未設定なら ValueError（本文だけ出て「コメント欄に」が空振りしないようにする）。
+
+def join_replies(replies: list[str]) -> str:
+    return f"\n{REPLY_SEP}\n".join(r.strip() for r in replies)
+
+
+def build_comment(template: str, offer: str, settings: dict[str, str]) -> str:
+    """紹介文の ○○ をサービス名に置き換え、先頭に広告表記・末尾にリンクを付ける。
+
+    サービス名やリンクが未設定なら ValueError（投稿だけ出て「次のコメントに」が空振りしないようにする）。
     """
     if offer not in OFFERS:
         raise ValueError(f"紹介先「{offer}」が不明です（{' / '.join(OFFERS)} のどれか）")

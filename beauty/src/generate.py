@@ -3,6 +3,7 @@
     python beauty/src/generate.py                  # 次の月曜から7日分
     python beauty/src/generate.py --start 2026-11-02 --days 3
     python beauty/src/generate.py --from-json beauty/drafts/2026-11-03_week.json
+    python beauty/src/generate.py --from-json beauty/drafts/2026-11-03_week.json --replace  # まだ出していない行を入れ直す
 """
 from __future__ import annotations
 
@@ -14,8 +15,8 @@ import sys
 import anthropic
 
 from common import (COLUMNS, KINDS, LINK_KINDS, OFFERS, POSTS_SHEET, ROOT, SLOTS, col, format_post_rows,
-                    next_post_row, now_jst, open_sheet, read_knowledge, read_settings, slot_kind,
-                    with_disclosure, write_setting)
+                    join_replies, next_post_row, now_jst, open_sheet, read_knowledge, read_settings,
+                    slot_kind, with_disclosure, write_setting)
 from threads import ThreadsError, refresh_token
 
 MODEL = "claude-opus-5-5"
@@ -46,10 +47,11 @@ POST_SCHEMA = {
                     "slot": {"type": "string", "enum": list(SLOTS)},
                     "theme": {"type": "string"},
                     "text": {"type": "string"},
+                    "replies": {"type": "array", "items": {"type": "string"}},
                     "offer": {"type": "string", "enum": [*OFFERS, "なし"]},
                     "comment": {"type": "string"},
                 },
-                "required": ["slot", "theme", "text", "offer", "comment"],
+                "required": ["slot", "theme", "text", "replies", "offer", "comment"],
                 "additionalProperties": False,
             },
         }
@@ -61,15 +63,20 @@ POST_SCHEMA = {
 FORMAT_RULES = f"""\
 # 出力ルール
 - 1日3投稿。slot は「朝」「昼」「夜」を1つずつ。種類はプロンプトで枠ごとに指定する。
-- text：Threadsの本文。300字以内、文章のみ。1行目で手を止めさせる（「〇〇な人の特徴3つ」「雇う側だから言える〜」など）。
-  短い段落と改行で読みやすく。絵文字は0〜1個。ハッシュタグ・URLは書かない。広告表記はプログラムが付けるので書かない。
+- 1投稿は「本文（つかみ）＋自分のコメント3つ」のスレッドにする。メインの中身はコメントに書く。
+- text：本文。130字以内。答えは書かずに「続きが気になる」で止める（「〜が3つあります」「理由をコメント欄に」など）。
+  最後の行は「コメント欄に⤵」のようにコメントへ誘導する。1行目で手を止めさせる（「雇う側だから言えること」「〜な人へ」など）。
+- replies：コメントを3つ（多くても4つ）。それぞれ200字以内。
+  1つ目で本文の答えをはっきり出し、2つ目で理由や具体例、3つ目で確かめ方・締めの一言。
+  最後以外のコメントは末尾に「⤵」を付けて続きへつなぐ。①②の箇条書きや短い段落で読みやすく。
+- 本文・コメントとも絵文字は⤵以外0〜1個。ハッシュタグ・URLは書かない。広告表記はプログラムが付けるので書かない。
 - 種類ごとの書き方
   - 認知：美容の仕事に就いている人が「あるある」と手を止める話。リンクも紹介もしない。offer は「なし」、comment は空文字。
   - 興味関心：「職場を変えれば変わるかも」と思わせる具体的なコツ。リンクも紹介もしない。offer は「なし」、comment は空文字。
-  - 検索：紹介する転職サービスを調べたくさせる（何をしてくれるか・違い・使い分け）。本文の最後に「（使っているサービスはコメント欄に）」のように一言添える。
-  - 行動：登録前の「面倒」「不安」を先回りして消す（流れ・バレないか・すぐ転職しなくていい）。本文の最後に同じくコメント欄へ一言誘導する。
-- offer（検索・行動のみ）：本文を読んだ人が次に欲しいものに合う紹介先を選ぶ。経験者（今の職場を変えたい経験者）／未経験（未経験・ブランク）／条件（給与・休日などで探したい人）。
-- comment（検索・行動のみ）：コメント欄に貼る紹介文。PASONA（問題→共感→解決策→提案→後押し）で4〜5文、200字以内。
+  - 検索：紹介する転職サービスを調べたくさせる（何をしてくれるか・違い・使い分け）。最後のコメントの末尾を「使えるサービスは次のコメントに⤵」のように締める。
+  - 行動：登録前の「面倒」「不安」を先回りして消す（流れ・バレないか・すぐ転職しなくていい）。最後のコメントの末尾は検索と同じく次のコメントへ誘導する。
+- offer（検索・行動のみ）：読んだ人が次に欲しいものに合う紹介先を選ぶ。経験者（今の職場を変えたい経験者）／未経験（未経験・ブランク）／条件（給与・休日などで探したい人）。
+- comment（検索・行動のみ）：repliesの後に付ける紹介文。PASONA（問題→共感→解決策→提案→後押し）で4〜5文、200字以内。
   サービス名は必ず「○○」と書く（プログラムが置き換える）。広告表記・URLは書かない（プログラムが付ける）。
 """
 
@@ -88,7 +95,9 @@ def read_voice_examples() -> str:
     path = ROOT / "voice_examples.json"
     if not path.exists():
         return ""
-    examples = "\n\n".join(f"【{p['kind']}】\n{p['text']}" for p in json.loads(path.read_text(encoding="utf-8")))
+    examples = "\n\n".join(
+        f"【{p['kind']}】\n本文：{p['text']}\n" + "\n".join(f"コメント{i}：{c}" for i, c in enumerate(p.get("replies", []), 1))
+        for p in json.loads(path.read_text(encoding="utf-8")))
     return ("\n# 語り口の見本\n語り口・温度感はこの見本に合わせる。ただし同じ文章やテーマの焼き直しはしない。\n\n"
             f"{examples}\n")
 
@@ -119,7 +128,7 @@ def generate_day(client: anthropic.Anthropic, system: str, day: dt.date, recent:
             raise RuntimeError(f"{day}: 生成が拒否されました")
         text = "".join(b.text for b in response.content if b.type == "text")
         posts = json.loads(text)["posts"]
-        if sorted(p["slot"] for p in posts) == sorted(SLOTS):
+        if sorted(p["slot"] for p in posts) == sorted(SLOTS) and all(p["replies"] for p in posts):
             for p in posts:
                 p["kind"] = slot_kind(day, p["slot"])
             return sorted(posts, key=lambda p: list(SLOTS).index(p["slot"]))
@@ -135,6 +144,8 @@ def main() -> None:
     parser.add_argument("--start", help="開始日 YYYY-MM-DD（省略時は次の月曜）")
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--from-json", help="Claude を呼ばず、このJSONの投稿をそのままシートに入れる")
+    parser.add_argument("--replace", action="store_true",
+                        help="同じIDの行があっても、まだ投稿していなければ上書きする（承認はやり直し）")
     args = parser.parse_args()
 
     start = dt.date.fromisoformat(args.start) if args.start else next_monday(now_jst().date())
@@ -142,7 +153,11 @@ def main() -> None:
     settings = read_settings(sh)
     ws = sh.worksheet(POSTS_SHEET)
     values = ws.get_all_values()[1:]
-    existing = {r[col("ID")] for r in values if r}
+    row_of = {r[0]: i + 2 for i, r in enumerate(values) if r and r[0]}
+    # 上書きしてよい行（まだ本文を出していない行）。投稿ID列が無い古い見出しの行も、本文が出ていなければ対象
+    replaceable = {r[0] for r in values if r and r[0] and not any(x.startswith("投稿済み") for x in r)
+                   and not any(x.startswith("https://") for x in r)} if args.replace else set()
+    existing = set(row_of) - replaceable
     recent = [f"{r[col('テーマ')]}：{r[col('本文')][:40]}" for r in values if len(r) > col("本文")]
 
     prepared: dict[str, list[dict]] = {}
@@ -156,7 +171,7 @@ def main() -> None:
         system = build_system(settings)
     disclosure = settings.get("必須表記", "")
 
-    rows = []
+    rows, updates = [], []
     for i in range(args.days):
         day = start + dt.timedelta(days=i)
         if all(f"{day.isoformat()}-{s}" in existing for s in SLOTS):
@@ -178,11 +193,15 @@ def main() -> None:
             row[col("種類")] = kind
             row[col("テーマ")] = p["theme"]
             row[col("本文")] = with_disclosure(p["text"], kind, disclosure)
+            row[col("コメント")] = join_replies(p.get("replies", []))
             row[col("紹介先")] = offer if linked else ""
-            row[col("コメント")] = p.get("comment", "") if linked else ""
+            row[col("紹介文")] = p.get("comment", "") if linked else ""
             row[col("承認")] = "FALSE"
             row[col("状態")] = "下書き"
-            rows.append(row)
+            if post_id in row_of:
+                updates.append((row_of[post_id], row))
+            else:
+                rows.append(row)
             recent.append(f"{p['theme']}：{p['text'][:40]}")
         print(f"{day}: {len(day_posts)}投稿を追加")
 
@@ -193,7 +212,11 @@ def main() -> None:
             ws.add_rows(end_row - ws.row_count)
         ws.update(values=rows, range_name=f"A{start_row}", value_input_option="USER_ENTERED")
         format_post_rows(sh, ws, start_row, end_row)
-    print(f"{len(rows)}件をシートに追加しました")
+    for row_no, row in updates:
+        ws.update(values=[row], range_name=f"A{row_no}", value_input_option="USER_ENTERED")
+    if updates:
+        format_post_rows(sh, ws, min(n for n, _ in updates), max(n for n, _ in updates))
+    print(f"{len(rows)}件をシートに追加、{len(updates)}件を上書きしました")
 
     # 長期トークンは60日で切れるので、毎週更新しておく
     token = settings.get("access_token")
