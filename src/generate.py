@@ -12,7 +12,7 @@ import sys
 
 import anthropic
 
-from common import (ROOT, COLUMNS, join_replies, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
+from common import (ROOT, COLUMNS, col_letter, join_replies, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
                     now_jst, open_sheet, read_knowledge, read_settings, write_setting)
 from images import ensure_image, image_url, push_images
 from render import EMOTIONS
@@ -140,17 +140,92 @@ def next_monday(today: dt.date) -> dt.date:
     return today + dt.timedelta(days=(7 - today.weekday()) % 7 or 7)
 
 
+SPLIT_SCHEMA = {
+    "type": "object",
+    "properties": {"text": {"type": "string"}, "replies": {"type": "array", "items": {"type": "string"}}},
+    "required": ["text", "replies"],
+    "additionalProperties": False,
+}
+
+
+def split_existing(client: anthropic.Anthropic, system: str, slot: str, theme: str, body: str) -> dict:
+    """承認済みの長文の下書きを、内容を変えずに「本文（つかみ）＋コメント」に分け直す。"""
+    prompt = (
+        f"次の{slot}の投稿（テーマ：{theme}）は、オーナー本人が内容を確認済みの1本の長文です。\n"
+        "出力ルールの「本文（つかみ）＋コメント3つ」の形に分け直してください。\n"
+        "言っている内容・事実・所感・誘導先は変えず、新しい事実や数字を足さないこと。語り口もそのまま保つこと。\n"
+        "必須表記（#PR など）は書かないこと。\n\n"
+        f"{body}"
+    )
+    for _ in range(2):
+        response = client.beta.messages.create(
+            model=MODEL,
+            max_tokens=8000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            output_config={"format": {"type": "json_schema", "schema": SPLIT_SCHEMA}},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"{theme}: 分け直しが拒否されました")
+        out = json.loads("".join(b.text for b in response.content if b.type == "text"))
+        if out["text"].strip() and out["replies"]:
+            return out
+    raise RuntimeError(f"{theme}: 分け直しに失敗しました")
+
+
+def convert_existing(sh, ws, settings: dict[str, str], skip_hours: float) -> None:
+    """まだ投稿していない・コメントが空の下書きを、新しい形（つかみ＋コメント）に入れ替える。承認はそのまま残す。"""
+    client = anthropic.Anthropic()
+    system = build_system(settings)
+    disclosure = settings.get("必須表記", "")
+    values = ws.get_all_values()
+    width = max(len(values[0]), len(COLUMNS))
+    limit = now_jst() + dt.timedelta(hours=skip_hours)
+    done = 0
+    for i, r in enumerate(values[1:], 2):
+        r = r + [""] * (width - len(r))
+        if not r[0] or r[col("状態")] == "投稿済み" or r[col("投稿ID")] or r[col("コメント")].strip():
+            continue
+        try:
+            day = dt.date.fromisoformat(r[col("日付")])
+            hh, mm = map(int, SLOTS[r[col("枠")]].split(":"))
+        except (ValueError, KeyError):
+            continue
+        if dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=limit.tzinfo) <= limit:
+            print(f"{r[0]}: 予定が近いので今回は分け直さない")
+            continue
+        body = r[col("本文")].replace(disclosure, "").strip() if disclosure else r[col("本文")]
+        out = split_existing(client, system, r[col("枠")], r[col("テーマ")], body)
+        ws.batch_update([
+            {"range": f"{col_letter('本文')}{i}", "values": [[ensure_disclosure(out["text"], disclosure)]]},
+            {"range": f"{col_letter('コメント')}{i}", "values": [[join_replies(out["replies"])]]},
+        ], value_input_option="RAW")
+        format_post_rows(sh, ws, i, i)
+        done += 1
+        print(f"{r[0]}: つかみ＋コメント{len(out['replies'])}つに分け直しました")
+    print(f"{done}件を分け直しました")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--start", help="開始日 YYYY-MM-DD（省略時は次の月曜）")
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--from-json", help="Claude を呼ばず、このJSONの投稿をそのままシートに入れる")
+    parser.add_argument("--convert-existing", action="store_true",
+                        help="まだ投稿していない長文の下書きを、つかみ＋コメントの形に分け直す（新しい下書きは作らない）")
+    parser.add_argument("--skip-hours", type=float, default=3,
+                        help="--convert-existing で、この時間以内に投稿予定の行は分け直さない")
     args = parser.parse_args()
 
     start = dt.date.fromisoformat(args.start) if args.start else next_monday(now_jst().date())
     sh = open_sheet()
     settings = read_settings(sh)
     ws = sh.worksheet(POSTS_SHEET)
+    if args.convert_existing:
+        convert_existing(sh, ws, settings, args.skip_hours)
+        return
     values = ws.get_all_values()[1:]
     existing = {r[col("ID")] for r in values if r}
     recent = [f"{r[col('テーマ')]}：{r[col('本文')][:40]}" for r in values if len(r) > col("本文")]
