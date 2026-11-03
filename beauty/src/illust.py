@@ -6,6 +6,7 @@ OPENAI_API_KEY が無いときは何もしない（投稿は文章だけで出�
     python beauty/src/illust.py               # 今日以降の、画像がまだ無い投稿すべて
     python beauty/src/illust.py --limit 1     # 1枚だけ（お試し）
     python beauty/src/illust.py --redo 2026-11-03-朝   # この投稿の画像を作り直す
+    python beauty/src/illust.py --all                  # 今日以降のまだ出していない投稿を、すべて作り直す
 """
 from __future__ import annotations
 
@@ -19,22 +20,44 @@ import time
 
 import requests
 
-from common import POSTS_SHEET, ROOT, col, col_letter, now_jst, open_sheet
+from common import POSTS_SHEET, ROOT, col, col_letter, now_jst, open_sheet, split_replies
 
 IMAGES_DIR = ROOT / "images"
 MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
 
 STYLE = """\
-Soft, warm flat illustration for a Japanese Threads account that helps people working in the beauty industry
+Cute anime-style chibi illustration (super-deformed: big head, about 2.5 heads tall, large sparkly eyes, rounded simple shapes)
+for a Japanese Threads account that helps people working in the beauty industry
 (hair salon, esthetic salon, nail salon, eyelash salon) find workplaces that are not exploitative.
-Draw one simple scene that visually expresses the mood of the post hook below, so that people stop scrolling.
-- Palette: warm beige, off-white, dusty pink, soft mint accents. Gentle, calm, trustworthy. Not dark, not dramatic.
-- People: Japanese women in their 20s-30s working in a beauty salon, drawn simply. Friendly, not sexualized.
-- Absolutely no text, letters, numbers, logos or signs anywhere in the image.
-- Square composition with the main subject in the center and some empty space around it.
-
-Post hook (Japanese):
+Draw one scene that shows the content of the post below at a glance, so that people stop scrolling.
+- Style: clean anime line art, soft cel shading, pastel colors (warm beige, off-white, dusty pink, soft mint).
+  Cheerful and kawaii, gentle and trustworthy. Even when the topic is a worry, keep it light and cute, not dark.
+- Characters: chibi Japanese women working in beauty (vary hairstyle, hair color, uniform and job each time).
+  Friendly, not sexualized.
+- Absolutely no text, letters, numbers, logos or signs anywhere in the image. Speech bubbles may contain only simple icons.
+- Square composition with simple background and some empty space around the subject.
 """
+
+# 同じ構図ばかりにならないよう、投稿ごとに構図を変える（頬杖で考える構図は使わない）
+COMPOSITIONS = [
+    "two characters talking face to face across a small table, like a job interview or consultation",
+    "close-up of the character's hands holding a job listing paper or smartphone, with her surprised face behind it",
+    "the character working energetically at a salon station with a customer, full body",
+    "several small chibi characters lined up side by side, each showing a different situation, like an infographic without text",
+    "the character on her day off, relaxing happily at a cafe or park, with a small salon icon in a thought bubble",
+    "before/after split image: left side a tired chibi in a gloomy salon, right side the same chibi smiling in a bright salon",
+    "the character walking forward through an open door toward a bright, sparkling salon, seen from a low angle",
+    "a senior chibi stylist kindly teaching a beginner chibi, both holding tools",
+    "the character standing confidently with one finger raised as if explaining a tip, with simple icon symbols floating around",
+]
+# 使わない構図（毎回これになりがちなので明示して避ける）
+AVOID = "Do not draw a character resting her chin on her hand or thinking with a hand on her cheek."
+
+
+def build_prompt(pid: str, theme: str, text: str, first_reply: str) -> str:
+    composition = COMPOSITIONS[sum(map(ord, pid)) % len(COMPOSITIONS)]
+    return (f"{STYLE}- Composition: {composition}. Adapt it naturally to the post content.\n- {AVOID}\n\n"
+            f"Post theme: {theme}\nPost hook (Japanese):\n{text}\n\nThe answer in the thread (Japanese):\n{first_reply}\n")
 
 
 def generate_png(prompt: str) -> bytes:
@@ -82,6 +105,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0, help="作る枚数の上限（0なら全部）")
     parser.add_argument("--redo", nargs="*", default=[], help="画像を作り直す投稿のID")
+    parser.add_argument("--all", action="store_true", help="今日以降のまだ出していない投稿の画像を、すべて作り直す")
     args = parser.parse_args()
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -98,8 +122,10 @@ def main() -> int:
         pid = r[col("ID")]
         if not pid or r[col("投稿ID")]:  # 出したあとの投稿は変えない
             continue
-        if pid in args.redo or (not args.redo and not r[col("画像URL")] and r[col("日付")] >= today):
-            targets.append((i, pid, r[col("本文")]))
+        upcoming = r[col("日付")] >= today
+        if pid in args.redo or (args.all and upcoming) or (not args.redo and not r[col("画像URL")] and upcoming):
+            replies = split_replies(r[col("コメント")])
+            targets.append((i, pid, build_prompt(pid, r[col("テーマ")], r[col("本文")], replies[0] if replies else "")))
     if args.limit:
         targets = targets[:args.limit]
     if not targets:
@@ -108,9 +134,9 @@ def main() -> int:
 
     IMAGES_DIR.mkdir(exist_ok=True)
     made, failed = [], 0
-    for row_no, pid, text in targets:
+    for row_no, pid, prompt in targets:
         try:
-            png = generate_png(STYLE + text)
+            png = generate_png(prompt)
         except Exception as e:  # 1枚失敗しても他は続ける（画像が無い投稿は文章だけで出る）
             print(f"{pid}: {e}", file=sys.stderr)
             failed += 1

@@ -10,6 +10,10 @@ on:
       redo:
         description: 作り直す投稿のID（スペース区切り、例 2026-11-03-朝）。空なら画像の無い投稿すべて
         required: false
+      all:
+        description: 今日以降のまだ出していない投稿の画像を、すべて作り直す
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -52,6 +56,7 @@ jobs:
         if: steps.ready.outputs.ok == 'true'
         run: |
           ARGS=(--limit "${{ inputs.limit || '0' }}")
+          if [ "${{ inputs.all }}" = "true" ]; then ARGS+=(--all); fi
           if [ -n "${{ inputs.redo }}" ]; then ARGS+=(--redo ${{ inputs.redo }}); fi
           python beauty/src/illust.py "${ARGS[@]}"
         env:
