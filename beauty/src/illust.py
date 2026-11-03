@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import os
+import re
 import subprocess
 import sys
 import time
@@ -44,7 +45,14 @@ def generate_png(prompt: str) -> bytes:
         timeout=300,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"画像生成に失敗 {r.status_code}: {r.text[:300]}")
+        try:
+            err = r.json().get("error", {})
+            detail = f"{err.get('type')} / {err.get('code')} / {err.get('param')}: {err.get('message', '')}"
+        except ValueError:
+            detail = r.text
+        # キーの一部がメッセージに入ることがあるので伏せる
+        detail = re.sub(r"sk-[A-Za-z0-9_\-*]+", "sk-…", detail)[:300]
+        raise RuntimeError(f"画像生成に失敗 {r.status_code}: {detail}")
     return base64.b64decode(r.json()["data"][0]["b64_json"])
 
 
