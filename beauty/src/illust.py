@@ -22,7 +22,7 @@ import requests
 from common import POSTS_SHEET, ROOT, col, col_letter, now_jst, open_sheet
 
 IMAGES_DIR = ROOT / "images"
-MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2.5-flare")
 
 STYLE = """\
 Soft, warm flat illustration for a Japanese Threads account that helps people working in the beauty industry
