@@ -23,6 +23,11 @@ on:
 permissions:
   contents: write
 
+# Apps Script と定時実行の両方から呼ばれても、2つ同時に作らない（後の方は作成済みの日を飛ばす）
+concurrency:
+  group: beauty-generate
+  cancel-in-progress: false
+
 jobs:
   generate:
     runs-on: ubuntu-latest

@@ -4,18 +4,33 @@
  *
  * GitHub Actions の定時実行は大きく遅れたり飛ばされたりするため、
  * Google の時刻トリガーで定期的にシートを見て、投稿の予定時刻を過ぎた承認済みの行があれば
- * GitHub の「Threads 投稿」ワークフローを呼び出す。毎週日曜 10時台には下書き作成も呼び出す。
+ * GitHub の投稿ワークフローを呼び出す。毎週日曜 10時台には下書き作成も呼び出す。
+ * どこでもMUSEE と、美容のお仕事案内（BEAUTY_SHEET_ID があるときだけ）の両方を見る。
  *
- * 準備：プロジェクトの設定 → スクリプト プロパティに GITHUB_TOKEN と SHEET_ID を登録し、
- *       setupTriggers を1回だけ実行する。
+ * 準備：プロジェクトの設定 → スクリプト プロパティに GITHUB_TOKEN と SHEET_ID
+ *       （美容も動かすなら BEAUTY_SHEET_ID）を登録し、setupTriggers を1回だけ実行する。
  */
 const REPO = 'masaharu0312/threads_auto';
-// シートIDは公開リポジトリに載せない（スクリプト プロパティの SHEET_ID に登録する）
-const SHEET_ID = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
-const SLOTS = { '朝': [8, 0], '昼': [12, 30], '夜': [20, 30] };
 const GRACE_MINUTES = 180;        // post.py の GRACE と合わせる
-const DONE_STATES = ['投稿済み', '未承認のため見送り', '見送り（時間切れ）'];
 const MIN_INTERVAL_MINUTES = 8;   // 投稿処理を続けて呼びすぎないための間隔
+// シートIDは公開リポジトリに載せない（スクリプト プロパティに登録する）
+// 時刻は各アカウントの common.py の SLOTS と合わせる
+const ACCOUNTS = [
+  {
+    key: 'MUSEE', sheetProp: 'SHEET_ID', post: 'post.yml', generate: 'generate.yml',
+    slots: { '朝': [8, 0], '昼': [12, 30], '夜': [20, 30] },
+    doneStates: ['投稿済み', '未承認のため見送り', '見送り（時間切れ）'],
+  },
+  {
+    key: 'BEAUTY', sheetProp: 'BEAUTY_SHEET_ID', post: 'beauty-post.yml', generate: 'beauty-generate.yml',
+    slots: { '朝': [7, 30], '昼': [12, 30], '夜': [21, 0] },
+    doneStates: ['投稿済み', '投稿済み（コメント途中）', '未承認のため見送り', '見送り（時間切れ）'],
+  },
+];
+
+function sheetId_(account) {
+  return PropertiesService.getScriptProperties().getProperty(account.sheetProp);
+}
 
 function dispatch_(workflow) {
   const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
@@ -34,17 +49,17 @@ function dispatch_(workflow) {
 }
 
 /** 予定時刻を過ぎた承認済みの未投稿があるか（シートの「投稿」タブを見る） */
-function hasDuePost_() {
-  const values = SpreadsheetApp.openById(SHEET_ID).getSheetByName('投稿').getDataRange().getDisplayValues();
+function hasDuePost_(account) {
+  const values = SpreadsheetApp.openById(sheetId_(account)).getSheetByName('投稿').getDataRange().getDisplayValues();
   const head = values[0];
   const c = (name) => head.indexOf(name);
   const now = new Date();
   return values.slice(1).some((r) => {
-    if (!r[c('ID')] || DONE_STATES.indexOf(r[c('状態')]) >= 0) return false;
+    if (!r[c('ID')] || account.doneStates.indexOf(r[c('状態')]) >= 0) return false;
     if (String(r[c('承認')]).toUpperCase() !== 'TRUE') return false;
     // 本文は出たがコメントが途中のもの（コメント中・コメント失敗）は、時間がたっていても続きを付ける
     if (c('投稿ID') >= 0 && r[c('投稿ID')]) return true;
-    const slot = SLOTS[r[c('枠')]];
+    const slot = account.slots[r[c('枠')]];
     const d = String(r[c('日付')]).split(/[-\/]/).map(Number);
     if (!slot || d.length !== 3) return false;
     // 日本時間の予定時刻（UTC に直して比較する）
@@ -57,16 +72,29 @@ function hasDuePost_() {
 /** 10分ごとに呼ばれる：投稿の予定があれば GitHub の投稿処理を動かす */
 function checkAndPost() {
   const props = PropertiesService.getScriptProperties();
-  const last = Number(props.getProperty('LAST_POST_DISPATCH') || 0);
-  if (Date.now() - last < MIN_INTERVAL_MINUTES * 60000) return;
-  if (!hasDuePost_()) return;
-  dispatch_('post.yml');
-  props.setProperty('LAST_POST_DISPATCH', String(Date.now()));
+  const errors = [];
+  ACCOUNTS.forEach((account) => {
+    if (!sheetId_(account)) return;
+    // MUSEE は以前からのキー名のまま
+    const lastKey = account.key === 'MUSEE' ? 'LAST_POST_DISPATCH' : 'LAST_POST_DISPATCH_' + account.key;
+    const last = Number(props.getProperty(lastKey) || 0);
+    if (Date.now() - last < MIN_INTERVAL_MINUTES * 60000) return;
+    try {  // 片方が失敗しても、もう片方は動かす
+      if (!hasDuePost_(account)) return;
+      dispatch_(account.post);
+      props.setProperty(lastKey, String(Date.now()));
+    } catch (e) {
+      errors.push(account.key + ': ' + e.message);
+    }
+  });
+  if (errors.length) throw new Error(errors.join('\n'));
 }
 
 /** 毎週日曜 10時台に呼ばれる：翌週の下書きを作る */
 function weeklyGenerate() {
-  dispatch_('generate.yml');
+  ACCOUNTS.forEach((account) => {
+    if (sheetId_(account)) dispatch_(account.generate);
+  });
 }
 
 /** 最初に1回だけ実行する：トリガーを作り直す */
