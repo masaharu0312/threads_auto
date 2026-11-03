@@ -17,6 +17,10 @@ on:
         required: false
         type: boolean
         default: false
+      skip_hours:
+        description: 分け直すとき、この時間以内に投稿予定の行は対象外にする（0なら全部）
+        required: false
+        default: "3"
       from_json:
         description: 取り込むJSON（例 drafts/2026-10-26_week_v2.json）。指定するとAIを使わずそのまま取り込む
         required: false
@@ -48,7 +52,7 @@ jobs:
           ARGS="--days ${{ inputs.days || '7' }}"
           if [ -n "${{ inputs.start }}" ]; then ARGS="$ARGS --start ${{ inputs.start }}"; fi
           if [ -n "${{ inputs.from_json }}" ]; then ARGS="$ARGS --from-json ${{ inputs.from_json }}"; fi
-          if [ "${{ inputs.convert_existing }}" = "true" ]; then ARGS="--convert-existing"; fi
+          if [ "${{ inputs.convert_existing }}" = "true" ]; then ARGS="--convert-existing --skip-hours ${{ inputs.skip_hours || '3' }}"; fi
           python src/generate.py $ARGS
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}
