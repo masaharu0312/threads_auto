@@ -22,7 +22,10 @@ COLUMNS = [
     "ID", "日付", "枠", "ターゲット", "テーマ", "本文",
     "画像タイプ", "画像見出し", "画像本文", "画像注記", "写真ファイル",
     "画像URL", "プレビュー", "承認", "状態", "投稿日時", "投稿URL", "エラー", "表情",
+    "コメント", "コメントURL", "投稿ID", "コメントID",
 ]
+# 本文（つかみ）のあとに付ける自分のコメント（メインの中身）は、「コメント」列にこの行で区切って書く
+REPLY_SEP = "---"
 
 # 設定シートの初期値（キー, 値, 説明）
 SETTINGS_DEFAULTS = [
@@ -102,7 +105,28 @@ def format_post_rows(sh: gspread.Spreadsheet, ws: gspread.Worksheet, first: int,
             "range": {**rows, "startColumnIndex": col("本文"), "endColumnIndex": col("本文") + 1},
             "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"}},
             "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
+        {"repeatCell": {
+            "range": {**rows, "startColumnIndex": col("コメント"), "endColumnIndex": col("コメント") + 1},
+            "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP", "verticalAlignment": "TOP"}},
+            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)"}},
     ]})
+
+
+def split_replies(text: str) -> list[str]:
+    """「コメント」列を、--- の行で区切ったコメントのリストにする。"""
+    parts, cur = [], []
+    for line in text.splitlines():
+        if line.strip() == REPLY_SEP:
+            parts.append("\n".join(cur))
+            cur = []
+        else:
+            cur.append(line)
+    parts.append("\n".join(cur))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def join_replies(replies: list[str]) -> str:
+    return f"\n{REPLY_SEP}\n".join(r.strip() for r in replies)
 
 
 def read_knowledge() -> str:

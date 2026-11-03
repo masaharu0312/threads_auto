@@ -12,7 +12,7 @@ import sys
 
 import anthropic
 
-from common import (ROOT, COLUMNS, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
+from common import (ROOT, COLUMNS, join_replies, format_post_rows, next_post_row, POSTS_SHEET, SLOT_TARGETS, SLOTS, col, ensure_disclosure,
                     now_jst, open_sheet, read_knowledge, read_settings, write_setting)
 from images import ensure_image, image_url, push_images
 from render import EMOTIONS
@@ -44,13 +44,14 @@ POST_SCHEMA = {
                     "slot": {"type": "string", "enum": list(SLOTS)},
                     "theme": {"type": "string"},
                     "text": {"type": "string"},
+                    "replies": {"type": "array", "items": {"type": "string"}},
                     "image_kind": {"type": "string", "enum": ["message", "number", "qa", "voice"]},
                     "image_headline": {"type": "string"},
                     "image_body": {"type": "string"},
                     "image_note": {"type": "string"},
                     "mascot_emotion": {"type": "string", "enum": list(EMOTIONS)},
                 },
-                "required": ["slot", "theme", "text", "image_kind",
+                "required": ["slot", "theme", "text", "replies", "image_kind",
                              "image_headline", "image_body", "image_note", "mascot_emotion"],
                 "additionalProperties": False,
             },
@@ -63,10 +64,16 @@ POST_SCHEMA = {
 FORMAT_RULES = """\
 # 出力ルール
 - 1日3投稿。slot は「朝」「昼」「夜」を1つずつ。
-  - 朝：ミュゼで働きたい人（未経験者・美容職からの転職者）向け。加盟店オーナー・ミュゼのファンとして「一緒に働く仲間」に語りかける。最後に設定の「求人の誘導先」へ自然に誘導する。
-  - 昼：どこでもMUSEEのオーナーになりたい人（サロン経営者・新規事業を考える法人・独立希望者）向け。先に加盟した一人として、良い点と注意点を客観的に伝える。最後に設定の「オーナー向け誘導先」へ誘導する。
+  - 朝：ミュゼで働きたい人（未経験者・美容職からの転職者）向け。加盟店オーナー・ミュゼのファンとして「一緒に働く仲間」に語りかける。最後のコメントで設定の「求人の誘導先」へ自然に誘導する。
+  - 昼：どこでもMUSEEのオーナーになりたい人（サロン経営者・新規事業を考える法人・独立希望者）向け。先に加盟した一人として、良い点と注意点を客観的に伝える。最後のコメントで設定の「オーナー向け誘導先」へ誘導する。
   - 夜：ミュゼのファンでもある加盟店オーナーの本音・ひとりごと。ミュゼの考え方や話題への個人的な所感で共感を集める。売り込みはしない。
-- text：Threadsの本文。350字以内。1行目で手を止めさせる。短い段落と改行で読みやすく。絵文字は0〜2個。ハッシュタグは書かない（Threadsは1投稿1つまでで、必須表記の #PR などに使うため）。必須表記はプログラムが付けるので書かない。
+- 1投稿は「本文（つかみ）＋自分のコメント3つ」を1本のスレッドにつなげる形にする。メインの中身はコメントに書く。
+- text：本文（つかみ）。130字以内。答えや結論は書かず「続きが気になる」ところで止める（「加盟して分かった〇〇が3つあります」「正直に言うと…」など）。
+  1行目で手を止めさせ、最後の行は「続きはコメント欄に⤵」のようにコメントへ誘導する。
+- replies：本文の続きになる自分のコメントを3つ（多くても4つ）。それぞれ200字以内。
+  1つ目で本文の答えをはっきり出し、2つ目で理由や具体的な所感、3つ目で注意点や締めの一言と誘導（朝・昼のみ）。
+  最後以外のコメントは末尾に「⤵」を付けて続きへつなぐ。①②の箇条書きや短い段落で読みやすく。
+- 本文・コメントとも、短い段落と改行で読みやすく。絵文字は⤵以外0〜2個。ハッシュタグは書かない（Threadsは1投稿1つまでで、必須表記の #PR などに使うため）。必須表記はプログラムが本文の末尾に付けるので書かない。
 - image_kind：message（見出し＋説明）／number（大きな数字＋説明）／qa（質問と答え）／voice（オーナーの声の引用）から内容に合うものを選ぶ。3投稿で同じ種類が続きすぎないようにする。
 - image_headline：画像の見出し。message は2行まで・1行9字以内で、行の区切りに必ず \\n を入れる（例：「キレイ」を\\n一緒に喜ぶ仕事。）。助詞だけが次の行に残る区切り方はしない。number は数字と単位だけ（例：460万人）、qa は30字以内の質問文、voice は50字以内の引用文。
 - image_body：画像の説明文。message・qa は60字以内、number は30字以内。voice の場合は「〇〇店オーナー」。
@@ -95,7 +102,8 @@ def read_voice_examples() -> str:
         return ""
     examples = "\n\n".join(f"【{p['slot']}】\n{p['text']}" for p in json.loads(path.read_text(encoding="utf-8")))
     return ("\n# 語り口の見本（オーナー本人が「自分の実感と合っている」と確認した投稿）\n"
-            "語り口・所感の入れ方・温度感はこの見本に合わせる。ただし同じ文章やテーマの焼き直しはしない。\n\n"
+            "語り口・所感の入れ方・温度感はこの見本に合わせる。ただし同じ文章やテーマの焼き直しはしない。\n"
+            "（見本は1本の長文だが、出力は出力ルールのとおり「本文（つかみ）＋コメント」に分ける）\n\n"
             f"{examples}\n")
 
 
@@ -123,7 +131,7 @@ def generate_day(client: anthropic.Anthropic, system: str, day: dt.date, recent:
             raise RuntimeError(f"{day}: 生成が拒否されました")
         text = "".join(b.text for b in response.content if b.type == "text")
         posts = json.loads(text)["posts"]
-        if sorted(p["slot"] for p in posts) == sorted(SLOTS):
+        if sorted(p["slot"] for p in posts) == sorted(SLOTS) and all(p.get("replies") for p in posts):
             return sorted(posts, key=lambda p: list(SLOTS).index(p["slot"]))
     raise RuntimeError(f"{day}: 3枠そろった投稿を生成できませんでした")
 
@@ -184,6 +192,7 @@ def main() -> None:
             row[col("ターゲット")] = SLOT_TARGETS[p["slot"]]
             row[col("テーマ")] = p["theme"]
             row[col("本文")] = ensure_disclosure(p["text"], disclosure)
+            row[col("コメント")] = join_replies(p.get("replies", []))
             row[col("画像タイプ")] = p["image_kind"]
             row[col("画像見出し")] = p["image_headline"]
             row[col("画像本文")] = p["image_body"]

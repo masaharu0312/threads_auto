@@ -9,13 +9,15 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+import time
 
 from common import (COLUMNS, JST, POSTS_SHEET, SLOTS, col, col_letter, ensure_disclosure,
-                    now_jst, open_sheet, read_settings)
+                    now_jst, open_sheet, read_settings, split_replies)
 from images import ensure_image, image_url, push_images, wait_until_public
-from threads import post_image
+from threads import post_image, post_text
 
 MAX_CHARS = 500
+REPLY_WAIT = 10  # コメントを続けて付けるときの間隔（秒）
 # 予定時刻からこれ以上遅れたら、深夜などの不自然な時間に出ないよう自動では投稿しない
 GRACE = dt.timedelta(hours=3)
 # もう投稿しない状態（見回りの対象から外す）
@@ -52,28 +54,50 @@ def main() -> int:
                         value_input_option="USER_ENTERED")
 
     def publish(row_no: int, r: list[str]) -> bool:
+        """本文（つかみ）を画像付きで投稿し、「コメント」列の中身を自分のコメントとしてスレッドにつなげる。"""
+        pid = r[col("ID")]
         text = ensure_disclosure(r[col("本文")], settings.get("必須表記", ""))
+        replies = split_replies(r[col("コメント")])
+        user_id, token = settings["user_id"], settings["access_token"]
+        media_id = r[col("投稿ID")]
+        # 途中で失敗したときは、付け終わったコメントの続きから付け直す
+        reply_ids = [x for x in r[col("コメントID")].splitlines() if x]
+        reply_urls = [x for x in r[col("コメントURL")].splitlines() if x]
         try:
-            if len(text) > MAX_CHARS:
-                raise ValueError(f"本文が{len(text)}字です（上限{MAX_CHARS}字）")
-            # シートで画像の文言を直していても反映されるよう、投稿直前に作り直す
-            path = ensure_image(r[col("枠")], r[col("画像タイプ")] or "message", r[col("画像見出し")],
-                                r[col("画像本文")], r[col("画像注記")], r[col("写真ファイル")],
-                                settings.get("表示名", ""), r[col("表情")])
-            if args.dry_run:
-                print(f"--- {r[col('ID')]} ---\n{text}\n画像: {path}")
-                return True
-            push_images([path], f"投稿画像 {r[col('ID')]}")
-            url = image_url(path)
-            wait_until_public(url)
-            _, permalink = post_image(settings["user_id"], settings["access_token"], text, url)
-            update(row_no, 画像URL=url, プレビュー=f'=IMAGE("{url}")', 状態="投稿済み",
-                   投稿日時=now_jst().strftime("%Y-%m-%d %H:%M"), 投稿URL=permalink, エラー="")
-            print(f"{r[col('ID')]}: 投稿しました {permalink}")
+            for label, t in [("本文", text), *((f"コメント{i}", c) for i, c in enumerate(replies, 1))]:
+                if len(t) > MAX_CHARS:
+                    raise ValueError(f"{label}が{len(t)}字です（上限{MAX_CHARS}字）")
+            if not media_id:
+                # シートで画像の文言を直していても反映されるよう、投稿直前に作り直す
+                path = ensure_image(r[col("枠")], r[col("画像タイプ")] or "message", r[col("画像見出し")],
+                                    r[col("画像本文")], r[col("画像注記")], r[col("写真ファイル")],
+                                    settings.get("表示名", ""), r[col("表情")])
+                if args.dry_run:
+                    print(f"--- {pid} ---\n{text}\n画像: {path}")
+                    for i, c in enumerate(replies, 1):
+                        print(f"[コメント{i}]\n{c}")
+                    return True
+                push_images([path], f"投稿画像 {pid}")
+                url = image_url(path)
+                wait_until_public(url)
+                media_id, permalink = post_image(user_id, token, text, url)
+                update(row_no, 画像URL=url, プレビュー=f'=IMAGE("{url}")', 投稿ID=media_id, 投稿URL=permalink,
+                       投稿日時=now_jst().strftime("%Y-%m-%d %H:%M"),
+                       状態="投稿済み" if len(reply_ids) >= len(replies) else "コメント中", エラー="")
+                print(f"{pid}: 投稿しました {permalink}")
+            for c in replies[len(reply_ids):]:
+                time.sleep(REPLY_WAIT)
+                # 直前のコメントへの返信にして、1本のスレッドとしてつなげる
+                cid, curl = post_text(user_id, token, c, reply_to_id=reply_ids[-1] if reply_ids else media_id)
+                reply_ids.append(cid)
+                reply_urls.append(curl)
+                update(row_no, コメントID="\n".join(reply_ids), コメントURL="\n".join(reply_urls),
+                       状態="投稿済み" if len(reply_ids) == len(replies) else "コメント中", エラー="")
+                print(f"{pid}: コメント{len(reply_ids)}/{len(replies)}を付けました {curl}")
             return True
-        except Exception as e:  # 失敗はシートに残す（見回りなら猶予時間内は次回また試す）
-            print(f"{r[col('ID')]}: 失敗 {e}", file=sys.stderr)
-            update(row_no, 状態="エラー", エラー=str(e)[:300])
+        except Exception as e:  # 失敗はシートに残す（見回りなら次回また続きから試す）
+            print(f"{pid}: 失敗 {e}", file=sys.stderr)
+            update(row_no, 状態="コメント失敗" if media_id else "エラー", エラー=str(e)[:300])
             return False
 
     def approved(r: list[str]) -> bool:
@@ -104,7 +128,10 @@ def main() -> int:
         at = scheduled_at(r)
         if at is None or at > now or r[col("状態")] in DONE_STATES:
             continue
-        if now - at > GRACE:
+        if r[col("投稿ID")]:
+            # 本文はもう出ているので、時間がたっていても残りのコメントを付ける
+            due.append((at, n, r))
+        elif now - at > GRACE:
             state = "見送り（時間切れ）" if approved(r) else "未承認のため見送り"
             print(f"{r[col('ID')]}: {state}")
             update(n, 状態=state)

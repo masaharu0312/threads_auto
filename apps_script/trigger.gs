@@ -42,6 +42,8 @@ function hasDuePost_() {
   return values.slice(1).some((r) => {
     if (!r[c('ID')] || DONE_STATES.indexOf(r[c('状態')]) >= 0) return false;
     if (String(r[c('承認')]).toUpperCase() !== 'TRUE') return false;
+    // 本文は出たがコメントが途中のもの（コメント中・コメント失敗）は、時間がたっていても続きを付ける
+    if (c('投稿ID') >= 0 && r[c('投稿ID')]) return true;
     const slot = SLOTS[r[c('枠')]];
     const d = String(r[c('日付')]).split(/[-\/]/).map(Number);
     if (!slot || d.length !== 3) return false;
