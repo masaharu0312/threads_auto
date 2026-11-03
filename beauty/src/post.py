@@ -1,6 +1,6 @@
 """承認済みの下書きを Threads に投稿する（文章のみ）。
 
-本文（つかみ）を出したあと、「コメント」列の中身を自分の返信として順に付ける。
+本文（つかみ）を出したあと（「画像URL」があれば画像付き）、「コメント」列の中身を自分の返信として順に付ける。
 検索・行動の投稿は、最後のコメントに紹介文とリンクを付ける。
 
     python beauty/src/post.py                     # 見回り：予定時刻を過ぎた承認済みの投稿を1件だけ投稿する
@@ -16,7 +16,7 @@ import time
 
 from common import (COLUMNS, JST, POSTS_SHEET, SLOTS, build_comment, col, col_letter, now_jst,
                     open_sheet, read_settings, split_replies, with_disclosure)
-from threads import post_text
+from threads import post_image, post_text
 
 MAX_CHARS = 500
 # 予定時刻からこれ以上遅れたら、深夜などの不自然な時間に出ないよう自動では投稿しない
@@ -69,7 +69,7 @@ def main() -> int:
                 if len(t) > MAX_CHARS:
                     raise ValueError(f"{label}が{len(t)}字です（上限{MAX_CHARS}字）")
             if args.dry_run:
-                print(f"--- {pid} ---\n{text}")
+                print(f"--- {pid} ---\n[画像] {r[col('画像URL')] or '（なし）'}\n{text}")
                 for i, c in enumerate(replies, 1):
                     print(f"[コメント{i}]\n{c}")
                 return True
@@ -85,7 +85,9 @@ def main() -> int:
         reply_urls = [x for x in r[col("コメントURL")].splitlines() if x]
         try:
             if not media_id:
-                media_id, permalink = post_text(user_id, token, text)
+                image = r[col("画像URL")].strip()
+                media_id, permalink = (post_image(user_id, token, text, image) if image
+                                       else post_text(user_id, token, text))
                 update(row_no, 投稿ID=media_id, 投稿URL=permalink,
                        投稿日時=now_jst().strftime("%Y-%m-%d %H:%M"),
                        状態="投稿済み" if not replies else "コメント中", エラー="")

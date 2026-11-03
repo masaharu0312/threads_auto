@@ -1,0 +1,60 @@
+name: 美容 イラストを作成
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 作る枚数の上限（0なら全部）
+        required: false
+        default: "0"
+      redo:
+        description: 作り直す投稿のID（スペース区切り、例 2026-11-03-朝）。空なら画像の無い投稿すべて
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beauty-illust
+  cancel-in-progress: false
+
+jobs:
+  illust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 準備ができているか確認
+        id: ready
+        run: |
+          if [ -z "$SHEET_ID" ] || [ -z "$OPENAI_API_KEY" ]; then
+            echo "BEAUTY_SHEET_ID か OPENAI_API_KEY が未登録のため、何もしません"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.ready.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+      - name: git の設定
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          git config user.name "threads-bot"
+          git config user.email "threads-bot@users.noreply.github.com"
+      - name: イラスト作成
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          ARGS=(--limit "${{ inputs.limit || '0' }}")
+          if [ -n "${{ inputs.redo }}" ]; then ARGS+=(--redo ${{ inputs.redo }}); fi
+          python beauty/src/illust.py "${ARGS[@]}"
+        env:
+          SHEET_ID: ${{ secrets.BEAUTY_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

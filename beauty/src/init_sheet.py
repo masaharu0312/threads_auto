@@ -41,6 +41,7 @@ def main() -> None:
         dims("COLUMNS", col("本文"), col("本文") + 1, 300),
         dims("COLUMNS", col("コメント"), col("コメント") + 1, 480),
         dims("COLUMNS", col("紹介文"), col("紹介文") + 1, 320),
+        dims("COLUMNS", col("画像URL"), col("画像URL") + 1, 200),
     ]})
     format_post_rows(sh, posts, 2, next_post_row(posts) - 1)
     print("シートの準備ができました。「設定」シートの値を埋めてください。")
