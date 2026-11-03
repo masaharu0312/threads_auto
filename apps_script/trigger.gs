@@ -1,14 +1,17 @@
 /**
- * 投稿用スプレッドシートに入れる Google Apps Script。
+ * 投稿の起動役になる Google Apps Script（シートに付けない独立したプロジェクトとして作る）。
+ * シートは「リンクを知っている全員が編集可」なので、シートに付けると GITHUB_TOKEN が見えてしまう。
  *
  * GitHub Actions の定時実行は大きく遅れたり飛ばされたりするため、
  * Google の時刻トリガーで定期的にシートを見て、投稿の予定時刻を過ぎた承認済みの行があれば
  * GitHub の「Threads 投稿」ワークフローを呼び出す。毎週日曜 10時台には下書き作成も呼び出す。
  *
- * 準備：プロジェクトの設定 → スクリプト プロパティに GITHUB_TOKEN を登録し、
+ * 準備：プロジェクトの設定 → スクリプト プロパティに GITHUB_TOKEN と SHEET_ID を登録し、
  *       setupTriggers を1回だけ実行する。
  */
 const REPO = 'masaharu0312/threads_auto';
+// シートIDは公開リポジトリに載せない（スクリプト プロパティの SHEET_ID に登録する）
+const SHEET_ID = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
 const SLOTS = { '朝': [8, 0], '昼': [12, 30], '夜': [20, 30] };
 const GRACE_MINUTES = 180;        // post.py の GRACE と合わせる
 const DONE_STATES = ['投稿済み', '未承認のため見送り', '見送り（時間切れ）'];
@@ -32,7 +35,7 @@ function dispatch_(workflow) {
 
 /** 予定時刻を過ぎた承認済みの未投稿があるか（シートの「投稿」タブを見る） */
 function hasDuePost_() {
-  const values = SpreadsheetApp.getActive().getSheetByName('投稿').getDataRange().getDisplayValues();
+  const values = SpreadsheetApp.openById(SHEET_ID).getSheetByName('投稿').getDataRange().getDisplayValues();
   const head = values[0];
   const c = (name) => head.indexOf(name);
   const now = new Date();
