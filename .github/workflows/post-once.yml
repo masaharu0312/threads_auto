@@ -1,0 +1,50 @@
+name: Threads 指定時刻に1回投稿
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_at:
+        description: 投稿開始時刻（例 2026-11-14T22:30:00+09:00）
+        required: true
+      date:
+        description: 投稿する下書きの日付
+        required: true
+      slot:
+        description: 投稿する下書きの枠
+        required: true
+        type: choice
+        options: [朝, 昼, 夜]
+
+permissions:
+  actions: write
+
+jobs:
+  wait-and-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: 指定時刻まで待機
+        env:
+          PUBLISH_AT: ${{ inputs.publish_at }}
+        run: |
+          python3 -u - <<'PY'
+          import datetime as dt
+          import os
+          import time
+          target = dt.datetime.fromisoformat(os.environ['PUBLISH_AT'])
+          if target.tzinfo is None:
+              raise ValueError('時刻にはタイムゾーンが必要です')
+          delay = target.timestamp() - time.time()
+          if delay < -300 or delay > 6 * 3600 - 1200:
+              raise ValueError('指定時刻は5分前から5時間40分後までにしてください')
+          print(f'投稿処理の起動予定: {target.isoformat()}')
+          while target.timestamp() > time.time():
+              time.sleep(min(30, max(0, target.timestamp() - time.time())))
+          PY
+      - name: 指定した下書きの投稿処理を起動
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          POST_DATE: ${{ inputs.date }}
+          POST_SLOT: ${{ inputs.slot }}
+        run: gh workflow run post.yml --repo "$REPO" --ref main -f "date=$POST_DATE" -f "slot=$POST_SLOT"
