@@ -14,7 +14,7 @@ import datetime as dt
 import sys
 import time
 
-from common import (COLUMNS, JST, POSTS_SHEET, SLOTS, build_comment, col, col_letter, now_jst,
+from common import (COLUMNS, JST, POST_SLOTS, POSTS_SHEET, build_comment, col, col_letter, now_jst,
                     open_sheet, read_settings, split_replies, with_disclosure)
 from threads import post_image, post_text
 
@@ -30,7 +30,7 @@ REPLY_WAIT = 30
 def scheduled_at(r: list[str]) -> dt.datetime | None:
     try:
         day = dt.date.fromisoformat(r[col("日付")])
-        hh, mm = map(int, SLOTS[r[col("枠")]].split(":"))
+        hh, mm = map(int, POST_SLOTS[r[col("枠")]].split(":"))
     except (ValueError, KeyError):
         return None
     return dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=JST)
@@ -38,7 +38,7 @@ def scheduled_at(r: list[str]) -> dt.datetime | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--slot", choices=list(SLOTS), help="この枠を今すぐ投稿する（省略時は見回り）")
+    parser.add_argument("--slot", choices=list(POST_SLOTS), help="この枠を今すぐ投稿する（省略時は見回り）")
     parser.add_argument("--date", help="--slot と一緒に使う日付 YYYY-MM-DD（省略時は今日）")
     parser.add_argument("--dry-run", action="store_true", help="投稿せずに内容だけ表示")
     args = parser.parse_args()

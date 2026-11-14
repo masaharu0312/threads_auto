@@ -14,7 +14,7 @@ const REPO = 'masaharu0312/threads_auto';
 const GRACE_MINUTES = 180;        // post.py の GRACE と合わせる
 const MIN_INTERVAL_MINUTES = 8;   // 投稿処理を続けて呼びすぎないための間隔
 // シートIDは公開リポジトリに載せない（スクリプト プロパティに登録する）
-// 時刻は各アカウントの common.py の SLOTS と合わせる
+// 時刻は各アカウントの common.py の SLOTS（美容は POST_SLOTS）と合わせる
 const ACCOUNTS = [
   {
     key: 'MUSEE', sheetProp: 'SHEET_ID', post: 'post.yml', generate: 'generate.yml',
@@ -23,7 +23,7 @@ const ACCOUNTS = [
   },
   {
     key: 'BEAUTY', sheetProp: 'BEAUTY_SHEET_ID', post: 'beauty-post.yml', generate: 'beauty-generate.yml',
-    slots: { '朝': [7, 30], '昼': [12, 30], '夜': [21, 0] },
+    slots: { '朝': [7, 30], '昼': [12, 30], '夜': [21, 0], '午前': [10, 0], '夕方': [18, 0] },
     doneStates: ['投稿済み', '投稿済み（コメント途中）', '未承認のため見送り', '見送り（時間切れ）'],
   },
 ];

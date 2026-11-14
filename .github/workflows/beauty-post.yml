@@ -10,7 +10,7 @@ on:
         description: 今すぐ投稿する枠（空なら見回り）
         required: false
         type: choice
-        options: ["", 朝, 昼, 夜]
+        options: ["", 朝, 昼, 夜, 午前, 夕方]
       date:
         description: 枠と一緒に使う日付 YYYY-MM-DD（空なら今日）
         required: false
